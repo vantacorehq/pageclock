@@ -1,0 +1,12 @@
+[package]
+name = "pageclock"
+version = "0.1.0"
+edition = "2021"
+license = "MIT"
+description = "Clock-sweep buffer pool for fixed-size pages. Zero dependencies. no_std."
+readme = "README.md"
+categories = ["memory-management", "database-implementations"]
+keywords = ["buffer-pool", "clock", "no_std", "database", "pages"]
+exclude = [".github/"]
+
+[dependencies]
