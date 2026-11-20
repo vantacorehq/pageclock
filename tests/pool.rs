@@ -209,3 +209,28 @@ fn bytes_mut_requires_a_pin() {
     assert_eq!(pool.bytes_mut(frame).err(), Some(Error::NotPinned));
     assert!(pool.bytes(frame).is_ok());
 }
+
+#[test]
+fn new_introspection_methods() {
+    let mut pool: Pool<64, 4> = Pool::new();
+    assert_eq!(pool.resident_count(), 0);
+    assert_eq!(pool.pinned_count(), 0);
+    assert_eq!(pool.dirty_count(), 0);
+    assert!(!pool.is_resident(1));
+
+    let f = pool.pin(1, |dst| { dst.fill(0); Ok(()) }, |_, _| Ok(())).unwrap();
+    assert!(pool.is_resident(1));
+    assert_eq!(pool.pin_count(f), Some(1));
+    assert_eq!(pool.pinned_count(), 1);
+
+    pool.bytes_mut(f).unwrap()[0] = 1;
+    assert_eq!(pool.dirty_count(), 1);
+
+    pool.unpin(f).unwrap();
+    assert_eq!(pool.pin_count(f), Some(0));
+    assert_eq!(pool.pinned_count(), 0);
+
+    pool.unpin_all();
+    pool.reset_stats();
+    assert_eq!(pool.stats().hits, 0);
+}
