@@ -113,9 +113,7 @@ impl<const PAGE: usize> Frame<PAGE> {
 /// Fixed table of `FRAMES` pages, each `PAGE` bytes.
 ///
 /// `PAGE` must be at least 8. `FRAMES` must be at least 1.
-/// [`Pool::new`] panics if either constant is outside that range: a buffer
-/// pool of zero frames, or a page too small for a 4-byte trailer plus a
-/// payload, is a programming error rather than a runtime one.
+/// [`Pool::new`] panics if either constant is outside that range.
 pub struct Pool<const PAGE: usize, const FRAMES: usize> {
     frames: [Frame<PAGE>; FRAMES],
     scratch: [u8; PAGE],
@@ -146,13 +144,8 @@ impl<const PAGE: usize, const FRAMES: usize> Pool<PAGE, FRAMES> {
         }
     }
 
-    pub const fn page_size(&self) -> usize {
-        PAGE
-    }
-
-    pub const fn frame_count(&self) -> usize {
-        FRAMES
-    }
+    pub const fn page_size(&self) -> usize { PAGE }
+    pub const fn frame_count(&self) -> usize { FRAMES }
 
     pub fn stats(&self) -> Stats {
         Stats {
@@ -168,19 +161,43 @@ impl<const PAGE: usize, const FRAMES: usize> Pool<PAGE, FRAMES> {
         self.frames.iter().filter(|frame| frame.page.is_some()).count()
     }
 
+    /// Returns true if `id` currently occupies a frame.
+    pub fn is_resident(&self, id: PageId) -> bool {
+        self.find(id).is_some()
+    }
+
+    /// Current pin count of a frame, or `None` if the index is bad / empty.
+    pub fn pin_count(&self, frame: usize) -> Option<u32> {
+        self.frames.get(frame).and_then(|f| f.page.map(|_| f.pins))
+    }
+
+    /// How many frames are currently pinned (>0 pins).
+    pub fn pinned_count(&self) -> usize {
+        self.frames.iter().filter(|f| f.pins > 0).count()
+    }
+
+    /// How many resident frames are dirty.
+    pub fn dirty_count(&self) -> usize {
+        self.frames.iter().filter(|f| f.page.is_some() && f.dirty).count()
+    }
+
+    /// Unpin every frame. Useful for orderly shutdown / testing.
+    /// Does not flush; call your own flush loop if needed.
+    pub fn unpin_all(&mut self) {
+        for frame in &mut self.frames {
+            frame.pins = 0;
+        }
+    }
+
+    /// Reset hit/miss/eviction/flush counters.
+    pub fn reset_stats(&mut self) {
+        self.hits = 0;
+        self.misses = 0;
+        self.evictions = 0;
+        self.flushes = 0;
+    }
+
     /// Pin `id`, loading it if it is not resident.
-    ///
-    /// On a hit the pin count goes up and the reference bit is set, which
-    /// gives the page a second chance against the clock.
-    ///
-    /// On a miss the clock first looks for a free frame, then walks frames
-    /// from the hand. A pinned frame is skipped. A referenced unpinned frame
-    /// loses its reference bit and is skipped once. The first unpinned,
-    /// unreferenced frame is the victim.
-    ///
-    /// `load` fills the scratch image. It is called only after a dirty victim
-    /// has been flushed successfully, and the victim is replaced only if
-    /// `load` returns `Ok(())`.
     pub fn pin<L, F>(&mut self, id: PageId, load: L, mut flush: F) -> Result<usize, Error>
     where
         L: FnOnce(&mut [u8]) -> Result<(), ()>,
@@ -267,8 +284,6 @@ impl<const PAGE: usize, const FRAMES: usize> Pool<PAGE, FRAMES> {
     }
 
     /// Write a CRC-32 of `bytes[..PAGE - 4]` into the last four bytes.
-    ///
-    /// The frame must be pinned. Sealing marks the page dirty.
     pub fn seal(&mut self, frame: usize) -> Result<(), Error> {
         let frame = self.frame_mut_pinned(frame)?;
         let digest = crc32(&frame.bytes[..PAGE - 4]);
@@ -287,11 +302,7 @@ impl<const PAGE: usize, const FRAMES: usize> Pool<PAGE, FRAMES> {
             bytes[PAGE - 2],
             bytes[PAGE - 1],
         ]);
-        if digest == stored {
-            Ok(())
-        } else {
-            Err(Error::Checksum)
-        }
+        if digest == stored { Ok(()) } else { Err(Error::Checksum) }
     }
 
     fn find(&self, id: PageId) -> Option<usize> {
@@ -300,37 +311,27 @@ impl<const PAGE: usize, const FRAMES: usize> Pool<PAGE, FRAMES> {
 
     fn frame(&self, index: usize) -> Result<&Frame<PAGE>, Error> {
         let frame = self.frames.get(index).ok_or(Error::BadFrame)?;
-        if frame.page.is_none() {
-            return Err(Error::BadFrame);
-        }
+        if frame.page.is_none() { return Err(Error::BadFrame); }
         Ok(frame)
     }
 
     fn frame_mut_pinned(&mut self, index: usize) -> Result<&mut Frame<PAGE>, Error> {
         let frame = self.frames.get_mut(index).ok_or(Error::BadFrame)?;
-        if frame.page.is_none() {
-            return Err(Error::BadFrame);
-        }
-        if frame.pins == 0 {
-            return Err(Error::NotPinned);
-        }
+        if frame.page.is_none() { return Err(Error::BadFrame); }
+        if frame.pins == 0 { return Err(Error::NotPinned); }
         Ok(frame)
     }
 
     fn select_victim(&mut self) -> Result<usize, Error> {
         for step in 0..FRAMES {
             let index = (self.hand + step) % FRAMES;
-            if self.frames[index].page.is_none() {
-                return Ok(index);
-            }
+            if self.frames[index].page.is_none() { return Ok(index); }
         }
         for _ in 0..(FRAMES * 2) {
             let index = self.hand;
             self.hand = (self.hand + 1) % FRAMES;
             let frame = &mut self.frames[index];
-            if frame.pins > 0 {
-                continue;
-            }
+            if frame.pins > 0 { continue; }
             if frame.referenced {
                 frame.referenced = false;
                 continue;
@@ -342,7 +343,5 @@ impl<const PAGE: usize, const FRAMES: usize> Pool<PAGE, FRAMES> {
 }
 
 impl<const PAGE: usize, const FRAMES: usize> Default for Pool<PAGE, FRAMES> {
-    fn default() -> Self {
-        Self::new()
-    }
+    fn default() -> Self { Self::new() }
 }
