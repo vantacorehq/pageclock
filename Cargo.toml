@@ -1,12 +1,13 @@
 [package]
 name = "pageclock"
-version = "0.1.0"
+version = "0.2.0"
 edition = "2021"
 license = "MIT"
-description = "Clock-sweep buffer pool for fixed-size pages. Zero dependencies. no_std."
+description = "Clock-sweep buffer pool for fixed-size pages. Pins, dirty tracking, second chance, CRC32. Pure Rust, zero dependencies, no_std."
 readme = "README.md"
-categories = ["memory-management", "database-implementations"]
-keywords = ["buffer-pool", "clock", "no_std", "database", "pages"]
+repository = "https://github.com/vantacorehq/pageclock"
+categories = ["memory-management", "database-implementations", "no-std"]
+keywords = ["buffer-pool", "clock", "no_std", "database", "pages", "cache"]
 exclude = [".github/"]
 
 [dependencies]
